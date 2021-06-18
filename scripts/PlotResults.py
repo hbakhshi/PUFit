@@ -1,10 +1,12 @@
+#! /usr/bin/env python
+
 import ROOT
 ROOT.PyConfig.IgnoreCommandLineOptions = True
 ROOT.gROOT.SetBatch(True)
 
 import os
 
-f = ROOT.TFile.Open('fout.root')
+f = ROOT.TFile.Open('allResults.root')
 
 varName = None
 for l1 in f.GetListOfKeys():
@@ -51,7 +53,7 @@ for l1 in f.GetListOfKeys():
         if os.path.exists( fanimname ):
             os.remove( fanimname )
         for i in range(1,nBinsXSec+1):
-            if i%10:
+            if i%100:
                 continue
             print(i, nBinsXSec)
             xsec_i = h2dVarVsXSec.GetXaxis().GetBinCenter(i)
@@ -73,7 +75,7 @@ for l1 in f.GetListOfKeys():
             frameVar.Draw('same')
             
             if abs( xsec_i - bestXSecVal ) < 2:
-                c2.SaveAs(fanimname + '+40')
+                c2.SaveAs(fanimname + '+10')
             else:
                 c2.SaveAs(fanimname + '+1')
         
