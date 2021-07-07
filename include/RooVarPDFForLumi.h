@@ -17,6 +17,9 @@ public:
   RooVarPDFForLumi(const char *name, const char *title,
 		   TH2* _h2dSimulation, TH1* lumiDist,
 		   RooAbsReal& _xsection , RooAbsReal& _x , double deltaT , TDirectory* dir=NULL);
+  RooVarPDFForLumi(const char *name, const char *title,
+		   RooAbsReal& _xsection , RooAbsReal& _x , TH2* h2dVarVsXSec_);
+
   
   RooVarPDFForLumi(const RooVarPDFForLumi& other, const char* name=0);
   virtual TObject* clone(const char* newname) const override;

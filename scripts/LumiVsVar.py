@@ -1,86 +1,45 @@
-import csv
-
-allRuns = {}
-with open('f7056.csv', 'rb') as csvfile:
-    fillInfo = csv.reader(csvfile, delimiter=',', quotechar='|')
-    for r in fillInfo:
-        if r[0][0] == '#':
-            continue
-        try:
-            run,fill = r[0].split(':')
-        except:
-            print('warning0' , r[0])
-            continue
-        try:
-            ls1,ls2 = r[1].split(':')
-        except:
-            print('warning1' , r[1])
-            continue
-        try:
-            bxinfo = r[9]
-        except:
-            print('warning9', r)
-            continue
-        if ls1 != ls2:
-            print( 'warning' , run , fill , ls1 , ls2)
-        runi = int(run)
-        filli = int(fill)
-        ls = int(ls1)
-        if runi not in allRuns:
-            allRuns[runi] = {}
-        if ls in allRuns[runi]:
-            print('warning 2', run , ls )
-        allbx = {}
-        bxi = None
-        lrec = None
-        ldel = None
-        for bx in bxinfo[1:-1].split(' '):
-            try:
-                bxi = int(bx)
-                lrec = ldel = None
-            except:
-                if ldel == None:
-                    ldel = float(bx)
-                else:
-                    lrec = float(bx)
-                    allbx[bxi] = [ldel,lrec]
-                    bxi= None
-                    
-        allRuns[runi][ls] = allbx
-
-def GetLumi(run, ls , bx):
-    try:
-        return allRuns[run][ls][bx][0]
-    except:
-        return -1
-
 import ROOT
+
+fLumi = ROOT.TFile.Open("../data/F7056Lumi.root")
+tlumi = fLumi.LumiInfo
+tlumi.BuildIndex("Run" , "LS")
+
+def GetLumi(run, ls , bx , detector):
+    if run and ls:
+        tlumi.GetEntryWithIndex( run , ls )
+    return getattr( tlumi , detector )[bx]
+
 import array
 
-f = ROOT.TFile.Open('out_ZeroBiasF7056.root')
-tree = f.PUAnalyzer.Trees.Events
+f = ROOT.TFile.Open('../data/outnew_ZeroBiasF7056.root')
+tree = f.Events
 
 events = tree.GetEntries()
-leaves = 'lumi/D'
-leafValues = array.array('d', [0.0])
 newfile = ROOT.TFile.Open('newfilename.root','RECREATE')
 newtree = tree.CloneTree(0)
 
-newBranch = newtree.Branch( 'luminosity' , leafValues, leaves )
 
+allBranches = {}
+for ll in ['Del', 'Rec']:
+    for nt in ['pcc' , 'hfoc' , 'bcm1f' , 'pltzero' , 'hfet']:
+        bname = '{0}{1}'.format(nt,ll)
+        allBranches[ bname ] = array.array('d' , [0.0] )
+        newBranch = newtree.Branch( bname , allBranches[ bname ], '{0}/D'.format(bname) )
+        
 for i in range(events):
     tree.GetEntry(i)
 
-    run = tree.GetLeaf( "run" ).GetValue()
-    ls = tree.GetLeaf( "lumi" ).GetValue()
-    bx = tree.GetLeaf( "bx" ).GetValue()
+    run = int( tree.GetLeaf( "run" ).GetValue() )
+    ls = int( tree.GetLeaf( "lumi" ).GetValue() )
+    bx = int( tree.GetLeaf( "bx" ).GetValue() )
 
-    leafValues[0] = GetLumi( run , ls, bx )
+    for branch in allBranches:
+        allBranches[branch][0] = GetLumi( run , ls , bx , branch )
 
     newtree.Fill()
 
     if i % 300000 == 0:
-	print(i,events,run,ls,bx,leafValues)
+	print(i,events,run,ls,bx,allBranches)
 
 newtree.Write()
 newfile.Close()

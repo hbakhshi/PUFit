@@ -14,9 +14,8 @@ using namespace std;
 RooVarPDFForLumi::RooVarPDFForLumi(const char *name, const char *title,
 				   TH2* _h2d, TH1* lumiDist_ ,
 				   RooAbsReal& _xsection , RooAbsReal& _x , double deltaT , TDirectory* dir) : RooAbsPdf(name,title),
-											     fXSection("xsection" , "XSection" , this , _xsection),
-											     fXVar("x" , "X" , this , _x)
-{
+													       fXSection("xsection" , "XSection" , this , _xsection),
+													       fXVar("x" , "X" , this , _x){
   h2dSimulation = _h2d;
   lumiDist = lumiDist_;
   lumiDist->Scale( 1.0 / lumiDist->Integral() );
@@ -33,6 +32,20 @@ RooVarPDFForLumi::RooVarPDFForLumi(const char *name, const char *title,
   make2dHist(dir);
   //load histograms from directory and keep the relation with fXSection value
   //analyze one of the histograms and make the fXVar variable
+};
+
+RooVarPDFForLumi::RooVarPDFForLumi(const char *name, const char *title,
+				   RooAbsReal& _xsection , RooAbsReal& _x , TH2* h2dVarVsXSec_) : RooAbsPdf(name,title),
+												 fXSection("xsection" , "XSection" , this , _xsection),
+												 fXVar("x" , "X" , this , _x){
+  h2dSimulation = NULL;
+  lumiDist = NULL;
+  DeltaT = -1;
+  
+  __x = dynamic_cast<RooRealVar*>(&_x) ;
+  __xsection = dynamic_cast<RooRealVar*>(&_xsection);
+
+  h2dVarVsXSec = h2dVarVsXSec_;
 };
 
 void RooVarPDFForLumi::make2dHist(TDirectory* dir){
@@ -65,7 +78,7 @@ void RooVarPDFForLumi::make2dHist(TDirectory* dir){
       for(int j=0 ; j < hPUForXSec.GetNbinsX() ; j++){
 	int pu(hPUForXSec.GetXaxis()->GetBinLowEdge(j+1)) ;
 	double currentVal = hPUForXSec.GetBinContent(j+1);
-	hPUForXSec.SetBinContent( j+1 , currentVal+lumiProb*TMath::Poisson(pu , lambda) );
+	hPUForXSec.SetBinContent( j+1 , currentVal+lumiProb*(TMath::Poisson(pu , lambda)) ); //pu==int(lambda);
       }
     }
     if(puHistDir){
@@ -98,10 +111,10 @@ void RooVarPDFForLumi::make2dHist(TDirectory* dir){
 };
 
 RooVarPDFForLumi::RooVarPDFForLumi(const RooVarPDFForLumi& other, const char* name): RooAbsPdf(other,name),
-											     fXSection("xsection",this,other.fXSection),
-											     fXVar("x", this , other.fXVar),
-											     __x(other.__x),
-											     __xsection(other.__xsection){
+										     fXSection("xsection",this,other.fXSection),
+										     fXVar("x", this , other.fXVar),
+										     __x(other.__x),
+										     __xsection(other.__xsection){
   h2dSimulation = other.h2dSimulation;
   lumiDist = other.lumiDist;
   DeltaT = other.DeltaT;
