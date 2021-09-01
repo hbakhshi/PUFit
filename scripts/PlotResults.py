@@ -15,6 +15,7 @@ parser.add_argument( '--maxLumi' , dest='maxLumi' , default=-1 , help='' , type=
 parser.add_argument( '--nToSkip' , dest='nToSkip' , default=10 , help='' , type=float )
 parser.add_argument( '--logY' , dest='logY' , default=False , help='' , action='store_true' )
 parser.add_argument( '--nRebinGroups' , dest='nRebinGroups' , default=1 , help='' , type=int )
+parser.add_argument( '--PRJDIR' , dest='PRJDIR' , default="/home/hbakhshi/Documents/PU/MainFiles/" , help='' , type=str )
 
 opt = parser.parse_args()
 
@@ -24,14 +25,26 @@ if opt.input2:
     f2 = ROOT.TFile.Open( opt.input2 )
     
 varName = None
+theVariable = None
+h2dVarPU = None
 for l1 in f.GetListOfKeys():
     if 'TH2' in l1.GetClassName():
         varName = l1.GetName()
+        h2dVarPU = l1.ReadObj()
+        nbins = h2dVarPU.GetNbinsX()
+        fromVar = h2dVarPU.GetXaxis().GetXmin()
+        toVar = h2dVarPU.GetXaxis().GetXmax()
+
+        theVariable = ROOT.RooRealVar( varName , varName , fromVar , toVar )
+        theVariable.setBins( nbins )
+ROOT.gSystem.Load( '{0}/lib/libPUFit.so'.format(opt.PRJDIR) )
+
 
 import collections
 allResults = collections.OrderedDict()
 allFolders = sorted( list([a.GetName() for a in f.GetListOfKeys() if a.IsFolder() ] ) )
 f.Close()
+fOut = ROOT.TFile.Open('AllResults.root' , "recreate")
 for l1 in allFolders:
     #if l1.IsFolder():
         f = ROOT.TFile.Open(opt.input)
@@ -48,7 +61,8 @@ for l1 in allFolders:
             l.hLumi.Draw()
 
         c1.SaveAs('lumi_{0}.png'.format( l.GetName() ) )
-        
+
+            
         c2 = ROOT.TCanvas('c2_{0}'.format( l.GetName() ) )
         c2.Divide(2,1)
         if f2:
@@ -57,7 +71,7 @@ for l1 in allFolders:
             h2dVarVsXSec = l.Get( 'h2dVarVsXSec_pdf_{0}'.format( l.GetName() ) )
         if h2dVarVsXSec == None:
             print( 'no information for {0} is available'.format( l.GetName() ) )
-            allResults[l.GetName()] = ( 0 , 0 )
+            allResults[l.GetName()] = ( 0 , 0 , 0 , 0 )
             continue
         minXSec = h2dVarVsXSec.GetXaxis().GetXmin()
         maxXSec = h2dVarVsXSec.GetXaxis().GetXmax()
@@ -80,10 +94,30 @@ for l1 in allFolders:
         bestXSecVal = bestXSec.getVal()
         bestXSecErr = bestXSec.getError()
         #fitRes.plotOn( frameVar , 'xsection' , 'xsection' )
-        allResults[l.GetName()] = (bestXSecVal, bestXSecErr )
+        allResults[l.GetName()] = (bestXSecVal, bestXSecErr , fitRes.minNll() , fitRes.edm() )
+            
+        binId = 20
+        if l.GetName() != 'fullrange':
+            binId = int( l.GetName()[5:] )+1
+        if binId%5:
+            continue
+        else:
+            print( l.GetName() , binId , binId/5 + 1)
+            c = ROOT.TCanvas( "c_"+l.GetName() )
+            xsection = ROOT.RooRealVar("xsection" , "" ,  bestXSecVal , 60 , 80)
+            mypdf = ROOT.RooVarPDFForLumi( "pdf_"+l.GetName() , "" , xsection , theVariable , h2dVarVsXSec  )
+
+            frame = theVariable.frame()
+            hvarData.plotOn(frame).SetTitle( l.GetName() )
+            mypdf.plotOn( frame )
+            fitRes.plotOn( frame , 'xsection' , varName )
+            frame.Draw()
+            fOut.cd()
+            c.Write()
+            #continue
+
         if os.path.exists( fanimname ):
             os.remove( fanimname )
-
         yMax = None
         for i in range(1,nBinsXSec+1):
             xsec_i = h2dVarVsXSec.GetXaxis().GetBinCenter(i)
@@ -131,6 +165,9 @@ for l1 in allFolders:
             c2.SaveAs(fanimname + '+5')
 
         f.Close()
+
+hMinNLL = ROOT.TH1D('hMinNLL' , '' , len( allResults ) -1 , 0 , opt.maxLumi )
+hEDM = ROOT.TH1D('hEDM' , '' , len( allResults ) -1 , 0 , opt.maxLumi )
 hAllResults = ROOT.TH1D('hAllResults' , '' , len( allResults ) -1 , 0 , opt.maxLumi )
 hAllResultsFR = ROOT.TH1D('hAllResultsFullRange' , '' , 1 , 0 , opt.maxLumi )
 
@@ -144,6 +181,8 @@ for r in allResults:
         hAllResults.SetBinContent( binId , allResults[r][0] if allResults[r][0] else allResults['fullrange'][0] )
         hAllResults.SetBinError( binId , allResults[r][1] )
 
+        hEDM.SetBinContent( binId , allResults[r][3] if allResults[r][3] else allResults['fullrange'][3] )
+        hMinNLL.SetBinContent( binId , allResults[r][2] if allResults[r][2] else allResults['fullrange'][2] )
 cAllRecults = ROOT.TCanvas('cAllRecults' )
 hAllResults.SetStats(False)
 hAllResults.Draw()
@@ -153,8 +192,13 @@ hAllResultsFR.SetStats(False)
 hAllResultsFR.Draw('same')
 cAllRecults.SaveAs('AllResults.png')
 
-f = ROOT.TFile.Open('AllResults.root' , "recreate")
+
+fOut.cd()
 hAllResults.Write()
 hAllResultsFR.Write()
 cAllRecults.Write()
-f.Close()
+
+hEDM.Write()
+hMinNLL.Write()
+
+fOut.Close()
