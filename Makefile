@@ -6,7 +6,7 @@ HEADER_FILES := $(patsubst $(SRC_DIR)/%.cxx,%.h,$(SRC_FILES))
 HEADER_FILES_INDIR := $(patsubst $(SRC_DIR)/%.cxx,include/%.h,$(SRC_FILES))
 LDFLAGS := $(shell root-config --libs) -lRooFitCore -lRooFit -lRooFitMore -fPIC -shared 
 CPPFLAGS := -I$(shell root-config --incdir) -I./include/
-CXXFLAGS := -fPIC 
+CXXFLAGS := -fPIC -std=c++17
 #-DDEBUGL=7
 
 all: $(OBJ_DIR) lib/libPUFit.so lib/DEFS_rdict.pcm

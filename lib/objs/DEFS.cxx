@@ -34,9 +34,6 @@
 
 #include "TDataMember.h"
 
-// The generated code does not explicitly qualifies STL entities
-namespace std {} using namespace std;
-
 // Header files passed as explicit arguments
 #include "MultiBinMaker.h"
 #include "RooMinBiasXSection.h"
@@ -46,6 +43,9 @@ namespace std {} using namespace std;
 #include "RooVarPDFForLumi.h"
 
 // Header files passed via #pragma extra_include
+
+// The generated code does not explicitly qualify STL entities
+namespace std {} using namespace std;
 
 namespace ROOT {
    static void delete_MultiBinMaker(void *p);
@@ -898,7 +898,7 @@ namespace ROOT {
       vector<int> *ptr = 0;
       static ::TVirtualIsAProxy* isa_proxy = new ::TIsAProxy(typeid(vector<int>));
       static ::ROOT::TGenericClassInfo 
-         instance("vector<int>", -2, "vector", 386,
+         instance("vector<int>", -2, "vector", 339,
                   typeid(vector<int>), ::ROOT::Internal::DefineBehavior(ptr, ptr),
                   &vectorlEintgR_Dictionary, isa_proxy, 0,
                   sizeof(vector<int>) );
@@ -963,7 +963,7 @@ namespace ROOT {
       vector<RooTemplateProxy<RooAbsReal> > *ptr = 0;
       static ::TVirtualIsAProxy* isa_proxy = new ::TIsAProxy(typeid(vector<RooTemplateProxy<RooAbsReal> >));
       static ::ROOT::TGenericClassInfo 
-         instance("vector<RooTemplateProxy<RooAbsReal> >", -2, "vector", 386,
+         instance("vector<RooTemplateProxy<RooAbsReal> >", -2, "vector", 339,
                   typeid(vector<RooTemplateProxy<RooAbsReal> >), ::ROOT::Internal::DefineBehavior(ptr, ptr),
                   &vectorlERooTemplateProxylERooAbsRealgRsPgR_Dictionary, isa_proxy, 0,
                   sizeof(vector<RooTemplateProxy<RooAbsReal> >) );
@@ -1090,8 +1090,8 @@ namespace {
 0
     };
     static const char* includePaths[] = {
-"/opt/root/root_6_22/include/",
-"/home/hbakhshi/Documents/PU/MainFiles/include/",
+"/cvmfs/sft.cern.ch/lcg/releases/ROOT/v6.24.00-a725e/x86_64-centos7-gcc8-opt/include/",
+"/eos/home-h/hbakhshi/SWAN_projects/PUFit/include/",
 0
     };
     static const char* fwdDeclCode = R"DICTFWDDCLS(
