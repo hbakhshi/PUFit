@@ -8,8 +8,14 @@ PRJDIR="/eos/home-c/cmstandi/SWAN_projects/PUFit/"
 ROOT.gSystem.Load( '{0}/lib/libPUFit.so'.format(PRJDIR) )
 ROOT.gInterpreter.GenerateDictionary("map<string,RooAbsData*>","map")
 
+from collections import namedtuple
+class FitResult:
+    def __init__(self , **args):
+        for p in ['Index' , 'RooFitResult' , 'RooFitResultVal' , 'val' , 'err' , 'RangeName' , 'Canvas' , 'Info' , 'Frame1' , 'Frame2' , 'hpull']:
+            setattr( self , p , args.get( p , None ) )
+            
 class LumiRange:
-    def __init__(self , lname , lmin , lmax , nbins , ds , pdf , variable , xsection , hlumidist):
+    def __init__(self , lname , lmin , lmax , nbins , ds , pdf , variable , xsection , xsectionR , hlumidist , minv , maxv):
         self.LumiName = lname
         self.Min = lmin
         self.Max = lmax
@@ -17,46 +23,129 @@ class LumiRange:
         self.ds = ds
         self.pdf = pdf
         self.xsection = xsection
+        self.xsectionR = xsectionR
         self.hLumiDist = hlumidist
         self.BinnedDS = ROOT.RooDataHist( 'dsBinned{0}'.format(self.GetName()) , '' , ROOT.RooArgSet(variable) , ds )
-        
+        self.Variable = variable
+        self.MinV = minv 
+        self.MaxV = maxv
+        self.Fits = {}
+        self.FitResults = {}
     def GetName(self):
         return '{0}_{1}_{2}_{3}'.format( self.LumiName , self.Min , self.Max , self.nBins )
         
         
-    def Fit(self , binned=True , ncpus = 8 , var_range = None , verbose = 1):
-        dsToFit = self.BinnedDS if binned else self.ds
+    def ChooseDsToFit(self, binned):
+        self.dsToFit = self.BinnedDS if binned else self.ds
+        
+    def Fit(self , binned=True , ncpus = 8 , var_range = [0,0] , verbose = 1 , xsec_cond=True):
+        fitInfo = ( var_range[0], var_range[1] , binned , xsec_cond )
+        if fitInfo in self.Fits:
+            print('fit has already been done')
+            fitIndex = self.Fits[ fitInfo ]
+            self.fitResultVal = self.FitResults[fitIndex].RooFitResult
+            self.fitResult = self.FitResults[fitIndex].RooFitResultVal
+            return self.FitResults[fitIndex].val , self.FitResults[fitIndex].err
+        
+        fitIndex = len(self.FitResults)
+        fr = FitResult( Index=fitIndex , Info=fitInfo )
+        self.lastFitIndex = fitIndex
+        self.ChooseDsToFit(binned)
+        
         args = ROOT.RooLinkedList()
         args.Add(ROOT.RooFit.Save(True) )
-        args.Add(ROOT.RooFit.ConditionalObservables(self.xsection))
+        if xsec_cond:
+            args.Add(ROOT.RooFit.ConditionalObservables(self.xsection))
         args.Add(ROOT.RooFit.NumCPU(ncpus))
-        if var_range:
-            args.Add( ROOT.RooFit.Range(var_range[0] , var_range[1]) )
+        
+        fr.RangeName = ""
+        if var_range[0] != 0 and var_range[1] != 0:
+            fr.RangeName = "fitrange_{0}".format(fitIndex)
+            self.Variable.setRange( fr.RangeName  , self.MinV + var_range[0] , self.MaxV - var_range[1] )
+            args.Add( ROOT.RooFit.Range( fr.RangeName) )
             
         args.Add( ROOT.RooFit.Verbose(verbose>0) )
         args.Add( ROOT.RooFit.PrintLevel(verbose-1) )
         args.Add( ROOT.RooFit.Warnings(verbose>1) )
 
-        self.fitResult = self.pdf.fitTo(dsToFit , args)
-        self.fitResultVal = self.fitResult.floatParsFinal()[self.fitResult.floatParsFinal().index(self.xsection.GetName())]
+        fr.RooFitResult = self.pdf.fitTo(self.dsToFit , args)
+        fr.RooFitResultVal = fr.RooFitResult.floatParsFinal()[fr.RooFitResult.floatParsFinal().index(self.xsection.GetName())]
+        fr.val = fr.RooFitResultVal.getVal()
+        fr.err = fr.RooFitResultVal.getError()
         
-        return self.fitResultVal.getVal(), self.fitResultVal.getError()
+        self.Fits[ fitInfo ] = fitIndex
+        self.FitResults[ fitIndex ] = fr
+
+        return fitIndex
     
-    def AddToPlot(self , i , g):
-        g.AddPoint( (self.Min+self.Max)/2, self.fitResultVal.getVal() )
-        g.SetPointError(i,(self.Max-self.Min)/2 , self.fitResultVal.getError() )
+    def AddToPlot(self ,  g , fitIndex = -1):
+        if fitIndex < 0:
+            fitIndex = self.lastFitIndex
+        fr = self.FitResults[ fitIndex ]
+        status = fr.RooFitResult.status()
+        if status < len(g):
+            for gi,gg in g.items():
+                vv , ve = 0 , 0
+                if gi==status:
+                    vv = fr.val
+                    ve = fr.err
+                gg.AddPoint( (self.Min+self.Max)/2, vv  )
+                gg.SetPointError( gg.GetN()-1 ,(self.Max-self.Min)/2 , ve )
+        
+    def MakeCanvas(self , xsection_value = None , fitIndex = -1):
+        if fitIndex < 0:
+            fitIndex = self.lastFitIndex
+        fr = self.FitResults[ fitIndex ]
+        if fr.Canvas:
+            return fr.Canvas
+        
+        fr.Canvas = ROOT.TCanvas( "C_{0}_{1}".format( self.GetName() , fitIndex ) , self.GetName(), 1200 , 500 )
+
+        fr.Canvas.Divide( 4 , 1 )
+        fr.Canvas.cd(1)
+        
+        fr.Frame1 = self.Variable.frame()
+        binned = fr.Info[2]
+        dsToFit = self.BinnedDS if binned else self.ds
+        dsToFit.plotOn( fr.Frame1 )
+        
+        if xsection_value:
+            self.xsection.setVal( xsection_value )
+        else:
+            self.xsection.setVal( fr.val )
+        self.pdf.plotOn( fr.Frame1 , ROOT.RooFit.NormRange(fr.RangeName) )
+        fr.Frame1.Draw()
+        
+        fr.Canvas.cd(2)
+        fr.hpull = fr.Frame1.pullHist()
+        fr.Frame2 = self.Variable.frame()
+        fr.Frame2.addPlotable( fr.hpull, "P")
+        fr.Frame2.GetYaxis().SetTitleOffset(1.6)
+        fr.Frame2.Draw()
+        
+        fr.Canvas.cd(3)
+        #self.hLumiDist.Print()
+        self.hLumiDist.Draw("HIST")
+        
+        fr.Canvas.cd(4)
+        self.hLumiDist.Draw("E3")
+        
+        return fr.Canvas
     
 class PUDataLoader:
     def __init__(self , objname, runs, varName, lumiName = 'PHYSICSDel', MCTUNE = 5 , var_nb = -1 , var_f = None, var_l = None , 
-                 lumi_steps = 10 , lumi_nbinsperstep = 1 , xs_nb = 100 , xs_f = 0 , xs_l = 100 ):
+                 lumi_steps = 10 , lumi_nbinsperstep = 1 , xs_nb = 100 , xs_f = 0 , xs_l = 100 , fout = None):
+        
+        self.fout = fout
         self.objname = objname
         self.RUNS = runs
         self.varName = varName
         self.lumiName = lumiName
         self.MCTUNE = MCTUNE
     
-        self.xsection = ROOT.RooRealVar("xsection_{0}".format(objname) , "" ,  xs_f , xs_l)
-        self.xsection.setBins(xs_nb)
+        #self.xsection = ROOT.RooRealVar("xsection_{0}".format(objname) , "" ,  xs_f , xs_l)
+        #self.xsection.setBins(xs_nb)
+        self.xsectionInfo = [xs_f , xs_l , xs_nb ]
         
         self.RunCat = ROOT.RooCategory("Run", "Run")
         self.allDatasets = {}
@@ -96,6 +185,9 @@ class PUDataLoader:
             self.allDatasets[ catName ] = dsAll
             self.RunCat.defineType( catName  , index_ii )
             index_ii += 1
+        
+        self.AllGraphs = {}
+        self.AllMGraphs = {}
         
         self.ds = self.MakeDS( 0 , None , None)
 
@@ -145,35 +237,63 @@ class PUDataLoader:
 
     def SplitLumiRange(self, nsteps , nbinsPerStep):
         minlumi, maxlumi = self.GetRange( self.ds,self.LumiVar )
+        self.LumiVar.setRange( minlumi , maxlumi)
         print('min/max lumi',minlumi,maxlumi)
         stepl = (maxlumi-minlumi)/nsteps
         ret = []
         for i in range(nsteps):
+            xsection = ROOT.RooRealVar("xsection_{0}{1}".format(self.objname , i) , "" ,  self.xsectionInfo[0] , self.xsectionInfo[1])
+            xsection.setBins(self.xsectionInfo[2])
+            
             minl = minlumi+i*stepl 
             maxl = minlumi+(i+1)*stepl
+            self.LumiVar.setRange( minl , maxl )
             ds = self.MakeDS(minl , maxl , 'step_{0}'.format(i))
-            hlumi , pdf = self.MakePDF(ds ,'step_{0}'.format(i) , nbinsPerStep )
-            fitter = LumiRange(self.lumiName , minl , maxl , nbinsPerStep , ds , pdf , self.variable , self.xsection , hlumi)
+            minv,maxv = self.GetRange( ds , self.variable )
+            var = ROOT.RooRealVar( self.varName , "" , minv , maxv )
+            var.setBins( int( self.var_nb * (maxv-minv) / (self.var_l - self.var_f)) )
+            #var = ROOT.RooRealVar( self.varName , "" , self.var_f , self.var_l )
+            #var.setBins( int( self.var_nb ) )
+            #minv,maxv = self.var_f , self.var_l
+            hlumi , pdf = self.MakePDF(ds ,'step_{0}'.format(i) , nbinsPerStep , xsection , var )
+            fitter = LumiRange(self.lumiName , minl , maxl , nbinsPerStep , ds , pdf , var , xsection , self.xsectionInfo , hlumi , minv , maxv)
             ret.append(fitter)
         return ret
-    def FitAllRanges(self,binned=True , ncpus = 8 , var_range = None , verbose = 1 ):
-        self.graphSigmaVsLumi = ROOT.TGraphErrors()
+    def FitAllRanges(self,binned=True , ncpus = 8 , var_range = [0,0] , verbose = 1  , xsec_cond=True):
+        graphSigmaVsLumi = ROOT.TMultiGraph()
+        graphsSigmaVsLumi = {i:ROOT.TGraphErrors() for i in range(6)}
+        fit_index = 0
         for i in range( len(self.lumiRanges) ):
             r = self.lumiRanges[i]
-            v,e = r.Fit( binned , ncpus , var_range , verbose )
-            r.AddToPlot( i ,self.graphSigmaVsLumi)
-            
-    def MakePDF(self, ds , name,nbinsPerStep):
-        hlumi = ds.createHistogram("histLumi{0}".format(name),self.LumiVar,ROOT.RooFit.Binning(nbinsPerStep))
-        pdf = ROOT.RooVarPDFForLumi("pdf{0}".format(name) , "pdf" , self.hPUvsVar , hlumi , self.xsection , self.variable , 1e-3 * 1e6 / (2**18) )
+            fit_index = r.Fit( binned , ncpus , var_range , verbose ,  xsec_cond )
+            r.AddToPlot(graphsSigmaVsLumi)
+        for i,g in graphsSigmaVsLumi.items():
+            g.SetTitle( "fit status={0}".format(i) )
+            g.SetName("status{0}".format(i) )
+            if any( [ g.GetPointY(i) > 0 for i in range(g.GetN()) ] ):
+                graphSigmaVsLumi.Add( g , "PL" )
+                
+        self.AllGraphs[ fit_index ] = graphsSigmaVsLumi
+        self.AllMGraphs[ fit_index ] = graphSigmaVsLumi
+        return graphSigmaVsLumi
+        
+    def MakePDF(self, ds , name,nbinsPerStep , xs , var):
+        hlumi = ds.createHistogram("histLumi{0}".format(name),self.LumiVar,ROOT.RooFit.Binning(nbinsPerStep) )
+        dir_ = None
+        if self.fout :
+            dir_ = self.fout.mkdir( name )
+        pdf = ROOT.RooVarPDFForLumi("pdf{0}".format(name) , "pdf" , self.hPUvsVar , hlumi , xs , var , 1e-3 * 1e6 / (2**18) , dir_ )
         return hlumi,pdf
     
     def LoadSimHisto(self):
         fSIM = ROOT.TFile.Open('/eos/user/c/cmstandi/PURunIIFiles/{0}/SingleNeutrino_CP{1}{2}.root'.format(self.year,self.MCTUNE,"_APV" if self.APV else ""))
         maxPuSim = int( fSIM.PUAnalyzer.Trees.Events.GetMaximum("nInt") )
         print('maxPU = {0}'.format(maxPuSim))
-        fSIM.PUAnalyzer.Trees.Events.Draw("nInt:{0}>>h2d{4}({1},{2},{3} , {5} , 0 , {5})".format(self.varName,self.var_nb, self.var_f , self.var_l , self.objname , maxPuSim-20 ) , "" , "GOFF") 
+        fSIM.PUAnalyzer.Trees.Events.Draw("nInt:{0}>>h2d{4}( {1},{2},{3} , {6} , 1 , {5} )".format(self.varName,self.var_nb, self.var_f , self.var_l , self.objname , maxPuSim-20 , maxPuSim-21 ) , "" , "GOFF") 
         self.hPUvsVar = ROOT.gDirectory.Get("h2d{0}".format(self.objname))
         self.hPUvsVar.SetDirectory(0)
         fSIM.Close()
 
+    def DrawAllPlots(self , fitIndex = -1 ):
+        for lr in self.lumiRanges:
+            lr.MakeCanvas(fitIndex = fitIndex).Draw()

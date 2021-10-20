@@ -93,6 +93,8 @@ void RooVarPDFForLumi::make2dHist(TDirectory* dir){
       double currentVal = hPUForXSec.GetBinContent(j+1);
 
       TH1* hVarForPU = h2dSimulation->ProjectionX( "_px" , j+1 , j+2 );
+      if(hVarForPU->Integral() == 0)
+          continue;
       hVarForPU->Scale( 1.0 / hVarForPU->Integral() );
       for(int i = 0 ; i<hVarForPU->GetNbinsX() ; i++){
 	double val = hVarForPU->GetBinCenter(i+1);

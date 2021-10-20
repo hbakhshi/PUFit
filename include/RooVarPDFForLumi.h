@@ -24,11 +24,12 @@ public:
   RooVarPDFForLumi(const RooVarPDFForLumi& other, const char* name=0);
   virtual TObject* clone(const char* newname) const override;
   inline virtual ~RooVarPDFForLumi() { };
-    
+  
+  const TH2* getTheHist(){ return h2dVarVsXSec; };
 protected:
+  TH2* h2dVarVsXSec;    
   TH2* h2dSimulation;
   TH1* lumiDist;
-  TH2* h2dVarVsXSec;
   double DeltaT;
   
   RooRealVar* __x;
