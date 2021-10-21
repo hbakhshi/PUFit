@@ -8,3 +8,14 @@ def GetRunInformation(run):
             year = parts[-2]
             return year, era
     return None,None
+
+def GetAllRuns(year , era):
+    return allInfo[ '/eos/home-h/helfaham/PU_work/UL/after_bx/{0}/ZeroBias{1}.root'.format(year , era) ]
+
+def GetAllEras(year):
+    ret = []
+    for f in allInfo:
+        if str(year) in f:
+            ret.append( f.split('.')[0][-1] )
+            
+    return ret
