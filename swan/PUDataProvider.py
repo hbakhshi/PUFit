@@ -3,9 +3,12 @@ sys.path.append('../nTuplizer')
 from allInfo import GetRunInformation as GetRunInfo
 import array
 import ROOT
+import os.path
 
-PRJDIR="/eos/home-c/cmstandi/SWAN_projects/PUFit/"
+import os
+PRJDIR="{0}/SWAN_projects/PUFit/".format(os.environ['HOME']) 
 ROOT.gSystem.Load( '{0}/lib/libPUFit.so'.format(PRJDIR) )
+print("loaded")
 ROOT.gInterpreter.GenerateDictionary("map<string,RooAbsData*>","map")
 
 from collections import namedtuple
@@ -101,7 +104,7 @@ class LumiRange:
         
         fr.Canvas = ROOT.TCanvas( "C_{0}_{1}".format( self.GetName() , fitIndex ) , self.GetName(), 1200 , 500 )
 
-        fr.Canvas.Divide( 4 , 1 )
+        fr.Canvas.Divide( 3 , 1 )
         fr.Canvas.cd(1)
         
         fr.Frame1 = self.Variable.frame()
@@ -127,8 +130,8 @@ class LumiRange:
         #self.hLumiDist.Print()
         self.hLumiDist.Draw("HIST")
         
-        fr.Canvas.cd(4)
-        self.hLumiDist.Draw("E3")
+        #fr.Canvas.cd(4)
+        #self.hLumiDist.Draw("E3")
         
         return fr.Canvas
     
@@ -168,24 +171,43 @@ class PUDataLoader:
             elif self.APV != r < 278770:
                 raise ValueError('all runs should belong in after/before apv')
                 
-            fWS = ROOT.TFile.Open("/eos/user/c/cmstandi/PURunIIFiles/R{0}/wsfile.root".format(r))
-            self.allOpenFiles[r] = fWS
+            
+            fname = "/eos/user/c/cmstandi/PURunIIFiles/R{0}/wsfile.root".format(r)
+            print(fname)
+            if not os.path.isfile(fname):
+                print( 'file {0} not found'.format( fname ) )
+                continue
+            fWS = ROOT.TFile.Open(fname)
+            if fWS == None:
+                print( 'file {0} can not be open'.format( fname ) )
+                continue
+            if not hasattr( fWS , 'w' ):
+                print( 'file {0} doesnot have a workspace'.format( fname ) )
+                continue
             
             if self.WS == None:
                 self.WS = fWS.w
                 for v in self.WS.allVars():
                     if v.GetName() == self.varName:
                         self.variable = v
+                        self.variable.setRange(0 , 1000000)
                     if v.GetName() == self.lumiName:
                         self.LumiVar = v
+                        self.LumiVar.setRange( 0 , 10000000)
                 self.vars = ROOT.RooArgSet(self.LumiVar , self.variable)
                         
             dsAll = getattr( fWS , "DSR{0}".format( r ) )
             catName = 'Run{0}'.format(r)
-            self.allDatasets[ catName ] = dsAll
+            dsMain = ROOT.RooDataSet( catName , catName , dsAll , self.vars , '({0}>{1})'.format(self.lumiName , 25) )
+            print( 'number of selected events : {0}'.format( dsMain.numEntries() ) )
+            if dsMain.numEntries() == 0:
+                continue
+            self.allOpenFiles[r] = fWS
+            self.allDatasets[ catName ] = dsMain
             self.RunCat.defineType( catName  , index_ii )
             index_ii += 1
-        
+            fWS.Close()
+            print("File Closed ({0}/{1})".format(index_ii , len(runs) ))
         self.AllGraphs = {}
         self.AllMGraphs = {}
         
