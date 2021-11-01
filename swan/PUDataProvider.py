@@ -4,6 +4,7 @@ from allInfo import GetRunInformation as GetRunInfo
 import array
 import ROOT
 import os.path
+import plotly.express as px
 
 import os
 PRJDIR="{0}/SWAN_projects/PUFit/".format(os.environ['HOME']) 
@@ -14,9 +15,18 @@ ROOT.gInterpreter.GenerateDictionary("map<string,RooAbsData*>","map")
 from collections import namedtuple
 class FitResult:
     def __init__(self , **args):
-        for p in ['Index' , 'RooFitResult' , 'RooFitResultVal' , 'val' , 'err' , 'RangeName' , 'Canvas' , 'Info' , 'Frame1' , 'Frame2' , 'hpull']:
+        for p in ['Index' , 'RooFitResult' , 'RooFitResultVal' , 'val' , 'err' , 'RangeName' , 'Canvas' , 'Info' , 'Frame1' , 'Frame2' , 'hpull' , 'pdfCurve' , 'Frame0' ]:
             setattr( self , p , args.get( p , None ) )
             
+        self.Chi2s = {}
+    def AddChi2(self , ds , name ):
+        if ds.numEntries() == 0:
+            self.Chi2s[name] = -1
+            return
+        ds.plotOn( self.Frame0 , ROOT.RooFit.Rescale(1.0/ds.numEntries()) , ROOT.RooFit.DrawOption("PLC PMC") )
+        hist = self.Frame0.getObject( 1+ sum([v>=0 for _,v in self.Chi2s.items() ] ) )
+        self.Chi2s[name] = self.pdfCurve.chiSquare(hist , 1)
+        
 class LumiRange:
     def __init__(self , lname , lmin , lmax , nbins , ds , pdf , variable , xsection , xsectionR , hlumidist , minv , maxv):
         self.LumiName = lname
@@ -76,25 +86,17 @@ class LumiRange:
         fr.val = fr.RooFitResultVal.getVal()
         fr.err = fr.RooFitResultVal.getError()
         
+        fr.Frame0 = self.Variable.frame()
+        self.pdf.plotOn( fr.Frame0 )
+        fr.pdfCurve = fr.Frame0.getObject(0)
+        fr.AddChi2(self.dsToFit , 'All')
         self.Fits[ fitInfo ] = fitIndex
         self.FitResults[ fitIndex ] = fr
-
         return fitIndex
-    
-    def AddToPlot(self ,  g , fitIndex = -1):
-        if fitIndex < 0:
-            fitIndex = self.lastFitIndex
-        fr = self.FitResults[ fitIndex ]
-        status = fr.RooFitResult.status()
-        if status < len(g):
-            for gi,gg in g.items():
-                vv , ve = 0 , 0
-                if gi==status:
-                    vv = fr.val
-                    ve = fr.err
-                gg.AddPoint( (self.Min+self.Max)/2, vv  )
-                gg.SetPointError( gg.GetN()-1 ,(self.Max-self.Min)/2 , ve )
         
+    def GetLumiBin(self):
+        return (self.Min+self.Max)/2, (self.Min-self.Max)/2
+    
     def MakeCanvas(self , xsection_value = None , fitIndex = -1):
         if fitIndex < 0:
             fitIndex = self.lastFitIndex
@@ -104,7 +106,7 @@ class LumiRange:
         
         fr.Canvas = ROOT.TCanvas( "C_{0}_{1}".format( self.GetName() , fitIndex ) , self.GetName(), 1200 , 500 )
 
-        fr.Canvas.Divide( 3 , 1 )
+        fr.Canvas.Divide( 4 , 1 )
         fr.Canvas.cd(1)
         
         fr.Frame1 = self.Variable.frame()
@@ -126,15 +128,119 @@ class LumiRange:
         fr.Frame2.GetYaxis().SetTitleOffset(1.6)
         fr.Frame2.Draw()
         
-        fr.Canvas.cd(3)
+        currentcanvas = fr.Canvas.cd(3)
         #self.hLumiDist.Print()
         self.hLumiDist.Draw("HIST")
         
-        #fr.Canvas.cd(4)
-        #self.hLumiDist.Draw("E3")
-        
+        fr.Canvas.cd(4)
+        fr.Frame0.Draw()
+        fr.Frame0.GetYaxis().SetRangeUser(0,0.3)
+        currentcanvas.BuildLegend()
         return fr.Canvas
     
+
+class DS:
+    def __init__(self):
+        pass
+    def SetValues(self , ds , variable , lumiVar , catName):
+        self.dsMain = ds
+        self.variable = variable 
+        self.lumiVar = lumiVar
+        self.catName = catName
+        
+class MDS:
+    def __init__(self , DSs , objname , Vars):
+        self.RunCat = ROOT.RooCategory("Run", "Run")
+        index_ii = 1
+        
+        self.allDatasetLinks = ROOT.std.map("string,RooAbsData*")()
+        for r in DSs:
+            self.RunCat.defineType( ds.catName  , index_ii )
+            self.allDatasetLinks[ ds.catName ] = ds.dsMain
+            index_ii += 1
+            
+        self.MainDS = ROOT.RooDataSet( "DS_{0}".format(objname) , "" , Vars  , ROOT.RooFit.Index( self.RunCat ) , ROOT.RooFit.Link( self.allDatasetLinks ) )
+    
+class RunDS(DS):
+    def __init__(self , r , varName , lumiName , minLumiCut = 25 ):
+        super().__init__()
+        self.Run = r
+        self.varName = varName
+        self.lumiName = lumiName
+        
+        self.year , self.era = GetRunInfo(r)
+        self.APV = r < 278770
+        
+        fname = "/eos/user/c/cmstandi/PURunIIFiles/R{0}/wsfile.root".format(r)
+        print(fname)
+        if not os.path.isfile(fname):
+            raise FileNotFoundError('file {0} is not found'.format( fname ) )
+        fWS = ROOT.TFile.Open(fname)
+        
+        if fWS == None:
+            raise IOError( 'file {0} can not be open'.format( fname ) )
+        if not hasattr( fWS , 'w' ):
+            raise IOError( 'file {0} doesnot have a workspace'.format( fname ) )
+        
+        self.WS = fWS.w
+        for v in self.WS.allVars():
+            if v.GetName() == self.varName:
+                self.variable = v
+                self.variable.setRange(0 , 1000000)
+            if v.GetName() == self.lumiName:
+                self.LumiVar = v
+                self.LumiVar.setRange( 0 , 10000000)
+        self.vars = ROOT.RooArgSet(self.LumiVar , self.variable)
+        dsAll = getattr( fWS , "DSR{0}".format( r ) )
+        self.catName = 'Run{0}'.format(r)
+        self.dsMain = ROOT.RooDataSet( catName , catName , dsAll , self.vars , '({0}>{1})'.format(self.lumiName , minLumiCut) )
+        fWS.Close()
+        
+class RunLumiRangeDS(DS):
+    def __init__(self , runds , var , lumivar , lumi_f , lumi_t ):
+        pass
+
+class MultipleRunLumiRangeDS(MDS):
+    def __init__(self):
+        pass
+    
+class MultipleRunDS(MDS):
+    def __init__(self, runs , lumi_steps, varName , lumiName , objname , minLumiCut = 25):
+        self.RUNS = runs
+        self.allDatasets = {}
+
+        index_ii = 1
+        
+        for r in runs:
+            ds = RunDS(r , varName , lumiName , minLumiCut)
+            self.allDatasets[ ds.catName ] = ds
+            
+        if len(set( [(ds.year,ds.era,ds.APV) for _,ds in self.allDatasets.items()] ) ) != 1:
+            print( {ds.r:(ds.year,ds.era,ds.APV) for _,ds in self.allDatasets.items()} )
+            raise ValueError( 'runs are not consistent' )
+            
+        self.year , self.era , self.APV = set( [(ds.year,ds.era,ds.APV) for _,ds in self.allDatasets.items()] )[0]
+        
+        super().__init__( [ds for _,ds in self.allDatasets.items()] , objname , self.Vars() )
+            
+        self.LumiVar = ROOT.RooRealVar( lumiName , lumiName , 0 , 1000000 )
+        self.MinLumi , self.MaxLumi = self.GetRange( self.MainDS , self.LumiVar )
+        
+        for ls in range(lumi_steps):
+            
+        
+    def GetRange(self , ds, v):
+        minv = array.array('d', [0.0])
+        maxv = array.array('d', [0.0])
+        ds.getRange(v , minv , maxv)
+        v.Print()
+        print(minv, maxv)
+        return [minv[0],maxv[0]]
+                                                    
+    def Vars(self):
+        for _,ds in self.allDatasets.items():
+            return ds.vars
+        
 class PUDataLoader:
     def __init__(self , objname, runs, varName, lumiName = 'PHYSICSDel', MCTUNE = 5 , var_nb = -1 , var_f = None, var_l = None , 
                  lumi_steps = 10 , lumi_nbinsperstep = 1 , xs_nb = 100 , xs_f = 0 , xs_l = 100 , fout = None):
@@ -208,8 +314,7 @@ class PUDataLoader:
             index_ii += 1
             fWS.Close()
             print("File Closed ({0}/{1})".format(index_ii , len(runs) ))
-        self.AllGraphs = {}
-        self.AllMGraphs = {}
+        self.AllFitResults = {}
         
         self.ds = self.MakeDS( 0 , None , None)
 
@@ -282,23 +387,58 @@ class PUDataLoader:
             ret.append(fitter)
         return ret
     def FitAllRanges(self,binned=True , ncpus = 8 , var_range = [0,0] , verbose = 1  , xsec_cond=True):
-        graphSigmaVsLumi = ROOT.TMultiGraph()
-        graphsSigmaVsLumi = {i:ROOT.TGraphErrors() for i in range(6)}
+        fitres = {'lumi':[] , 'lumiw':[] , 'xsection':[] , 'status':[] , 'error':[]  , 'fit':[]}
         fit_index = 0
         for i in range( len(self.lumiRanges) ):
             r = self.lumiRanges[i]
-            fit_index = r.Fit( binned , ncpus , var_range , verbose ,  xsec_cond )
-            r.AddToPlot(graphsSigmaVsLumi)
-        for i,g in graphsSigmaVsLumi.items():
-            g.SetTitle( "fit status={0}".format(i) )
-            g.SetName("status{0}".format(i) )
-            if any( [ g.GetPointY(i) > 0 for i in range(g.GetN()) ] ):
-                graphSigmaVsLumi.Add( g , "PL" )
+            fit_index = r.Fit( binned , ncpus , var_range , verbose ,  xsec_cond )            
+            resfit = r.FitResults[ fit_index ]
+            
+            l,lw = r.GetLumiBin()
+            fitres['lumi'].append(l)
+            fitres['lumiw'].append(lw)
+            fitres['xsection'].append(resfit.val)
+            fitres['status'].append(str(resfit.RooFitResult.status()))
+            fitres['error'].append(resfit.err)
+            fitres['fit'].append('fit{0}'.format(fit_index))
                 
-        self.AllGraphs[ fit_index ] = graphsSigmaVsLumi
-        self.AllMGraphs[ fit_index ] = graphSigmaVsLumi
-        return graphSigmaVsLumi
+            for lll in getattr(self , 'DSLinkDSs_{0}_step_{1}'.format(self.objname , i ) ):
+                resfit.AddChi2(lll[1] , lll[0])
+            
+        self.AllFitResults[ fit_index ] = fitres
+        return fitres
+
+    def GetFitQualityPlot(self , fit_index ):
+        data = {'lumi':[] , 'runs':[] , 'chi2':[]}
+        for i in range( len(self.lumiRanges) ):
+            r = self.lumiRanges[i]
+            fr = r.FitResults[fit_index]
+            l,lw = r.GetLumiBin()
+            for n,chi2 in fr.Chi2s.items():
+                data['lumi'].append( l )
+                data['runs'].append( n )
+                data['chi2'].append( chi2 )
+        fig = px.scatter(data, x="lumi", y="chi2", color='runs')
+        fig.update_traces(marker=dict(size=12,
+                            line=dict(width=2,
+                                      color='DarkSlateGrey')),
+                            selector=dict(mode='markers'))
+        return fig
         
+            
+    def GetFitResultsPlot(self , fit_indices = None ):
+        if fit_indices == None:
+            fit_indices = self.AllFitResults.keys()
+        data = {a:[x for w in fit_indices for x in self.AllFitResults[w][a] ] for a in list( self.AllFitResults.values() )[0]}
+        
+        fig = px.scatter(data, x="lumi", y="xsection", symbol="fit" , error_y="error" , color='status' , error_x='lumiw' )
+        fig.update_traces(marker=dict(size=12,
+                            line=dict(width=2,
+                                      color='DarkSlateGrey')),
+                            selector=dict(mode='markers'))
+        return fig
+    
+    
     def MakePDF(self, ds , name,nbinsPerStep , xs , var):
         hlumi = ds.createHistogram("histLumi{0}".format(name),self.LumiVar,ROOT.RooFit.Binning(nbinsPerStep) )
         dir_ = None
